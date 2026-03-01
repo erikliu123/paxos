@@ -1,8 +1,11 @@
 package dslabs.atmostonce;
 
+import dslabs.framework.Address;
 import dslabs.framework.Application;
 import dslabs.framework.Command;
 import dslabs.framework.Result;
+import java.util.HashMap;
+import java.util.Map;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NonNull;
@@ -15,7 +18,8 @@ import lombok.ToString;
 public final class AMOApplication<T extends Application> implements Application {
   @Getter @NonNull private final T application;
 
-  // Your code here...
+  // Map from client address to the last executed sequence number and result
+  private final Map<Address, AMOResult> lastResults = new HashMap<>();
 
   @Override
   public AMOResult execute(Command command) {
@@ -24,9 +28,25 @@ public final class AMOApplication<T extends Application> implements Application 
     }
 
     AMOCommand amoCommand = (AMOCommand) command;
+    Address clientAddress = amoCommand.clientAddress();
+    int sequenceNum = amoCommand.sequenceNum();
 
-    // Your code here...
-    return null;
+    // Check if we've already executed this command
+    AMOResult lastResult = lastResults.get(clientAddress);
+    if (lastResult != null && lastResult.sequenceNum() >= sequenceNum) {
+      // Return cached result if it's the exact same sequence number
+      if (lastResult.sequenceNum() == sequenceNum) {
+        return lastResult;
+      }
+      // If sequence number is older, still return the last result (stale request)
+      return lastResult;
+    }
+
+    // Execute the command
+    Result result = application.execute(amoCommand.command());
+    AMOResult amoResult = new AMOResult(result, sequenceNum);
+    lastResults.put(clientAddress, amoResult);
+    return amoResult;
   }
 
   public Result executeReadOnly(Command command) {
@@ -42,7 +62,7 @@ public final class AMOApplication<T extends Application> implements Application 
   }
 
   public boolean alreadyExecuted(AMOCommand amoCommand) {
-    // Your code here...
-    return false;
+    AMOResult lastResult = lastResults.get(amoCommand.clientAddress());
+    return lastResult != null && lastResult.sequenceNum() >= amoCommand.sequenceNum();
   }
 }
